@@ -67,7 +67,7 @@ class Share extends ShareUtils
         flyout: 'top center'
         button_font: true
         button_color: '#333333'
-        button_background: '#1e1e1e'
+        button_background: '#a29baa'
         button_icon: 'export'
         button_text: 'Share'
 
@@ -98,9 +98,9 @@ class Share extends ShareUtils
 
   setup: (element, opts) ->
     ## Record all instances
-    #@el.instances = document.getElementsByClassName(element)
+    @el.instances = document.getElementsByClassName("share-button") # TODO: needed live NodeList
     #@el.instances = document.querySelectorAll("#{element}:not(.initialized)")
-    @el.instances = document.querySelectorAll(element)
+    #@el.instances = document.querySelectorAll(element)
 
     ## Extend config object
     @extend(@config, opts, true)
