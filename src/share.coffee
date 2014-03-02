@@ -1,208 +1,435 @@
-$ = jQuery
+class ShareUtils
+  extend: (to, from, overwrite) ->
+    for prop of from
+      hasProp = to[prop] isnt `undefined`
+      if hasProp and @type(from[prop]) is "object"
+        @extend(to[prop], from[prop], overwrite)
+      else
+        to[prop] = from[prop] if overwrite or not hasProp
+    return
 
-$.fn.share = (opts) ->
+  trim: (str) ->
+    (if str.trim then str.trim() else str.replace(/^\s+|\s+$/g, ""))
 
-  ###########################
-  # Check if elements exist #
-  ###########################
+  hide: (el) ->
+    el.style.display = "none"
+    return
 
-  if $(@).length is 0
-    console.log "Share Button: No elements found."
+  show: (el) ->
+    el.style.display = "block"
+    return
+
+  hasClass: (el, cn) ->
+    (" " + el.className + " ").indexOf(" " + cn + " ") isnt -1
+
+  addClass: (el, cn) ->
+    el.className = (if (el.className is "") then cn else el.className + " " + cn)  unless @hasClass(el, cn)
+    return
+
+  removeClass: (el, cn) ->
+    el.className = @trim(" " + el.className + " ".replace(" " + cn + " ", " "))
+    return
+
+  type: (obj) -> # typeof has problems: http://javascript.crockford.com/remedial.html
+    if obj == undefined or obj == null
+      return String obj
+    classToType = {
+      '[object Boolean]': 'boolean',
+      '[object Number]': 'number',
+      '[object String]': 'string',
+      '[object Function]': 'function',
+      '[object Array]': 'array',
+      '[object Date]': 'date',
+      '[object RegExp]': 'regexp',
+      '[object Object]': 'object'
+    }
+    return classToType[Object.prototype.toString.call(obj)]
+
+
+#####
+
+
+class Share extends ShareUtils
+  constructor: (element, options) ->
+    @el =
+      head: document.querySelector('head')
+      body: document.querySelector('body')
+
+    @config =
+      protocol: if ['http', 'https'].indexOf(window.location.href.split(':')[0]) is -1 then 'https://' else '//'
+      url: window.location.href
+      text: document.querySelector('meta[name=description]').getAttribute('content') || ''
+      title: null
+      caption: null
+      image: null
+
+      ui:
+        flyout: 'top center'
+        button_font: true
+        button_color: '#333333'
+        button_background: '#1e1e1e'
+        button_icon: 'export'
+        button_text: 'Share'
+
+      network:
+        google_plus:
+          enabled: true
+          path: null
+          url: null
+        twitter:
+          enabled: true
+          path: null
+          url: null
+          text: null
+        facebook:
+          enabled: true
+          path: null
+          url: null
+          app_id: null
+          title: null
+          caption: null
+          text: null
+          image: null
+
+    @setup(element, options)
+
+    return @
+
+
+  setup: (element, opts) ->
+    ## Record all instances
+    #@el.instances = document.getElementsByClassName(element)
+    #@el.instances = document.querySelectorAll("#{element}:not(.initialized)")
+    @el.instances = document.querySelectorAll(element)
+
+    ## Extend config object
+    @extend(@config, opts, true)
+
+    ## Apply missing network-specific configurations
+    @update_network_configuration()
+
+    ## Inject Icon Fontset
+    @inject_icons()
+
+    ## Inject Google's Lato Fontset (if enabled)
+    if @config.ui.button_font
+      @inject_fonts()
+
+    ## Inject Facebook JS SDK (if Facebook is enabled)
+    if @config.network.facebook.enabled
+      @inject_facebook_sdk()
+
+    ## Loop through and initialize each instance
+    for instance, index in @el.instances
+      @setup_instance(instance, index)
+
     return
 
 
-  #######################
-  # Set Global Elements #
-  #######################
+  setup_instance: (instance, index) ->
+    #@hide(instance)
 
-  $head = $('head')
-  $body = $('body')
+    @addClass(instance, "sharer-#{index}")
+    @addClass(instance, "initialized")
+    console.log instance.getAttribute('class')
 
+    #selector = ".#{instance.getAttribute('class').split(" ").join(".")}"
+    #console.log selector
+    #console.log document.querySelector(selector)
 
-  #########################
-  # Iterate over elements #
-  #########################
+    @inject_css(instance)
+    @inject_html(instance)
 
-  $(@).each (i, el) ->
-
-    ######################
-    # Set Local Elements #
-    ######################
-
-    $sharer = $(@)
+    @show(instance)
+    #console.log instance
 
 
-    #################
-    # Configuration #
-    #################
-
-    ## Add unique class to each element and hide
-
-    $sharer.addClass("sharer-#{i}")
-    $sharer.hide()
-
-    ## Set up options
-
-    opts ?= {}
-    config = {}
-
-    ## Basic Configurations
-
-    config.url        = opts.url || window.location.href
-    config.text       = opts.text || $('meta[name=description]').attr('content') || ''
-    config.app_id     = opts.app_id
-    config.title      = opts.title
-    config.image      = opts.image
-    config.flyout     = opts.flyout || 'top center'
-    config.text_font  = if typeof(opts.text_font) is 'boolean' then opts.text_font else true
- 
-    ## UI Configurations
-
-    config.button_color      = opts.color || '#333'
-    config.button_background = opts.background || '#e1e1e1'
-    config.button_icon       = opts.icon || 'export'
-    config.button_text       = if typeof(opts.button_text) is 'string'
-      opts.button_text
-    else
-      'Share'
-
-    ## Network-Specific Configurations
-
-    set_opt = (base,ext) -> if opts[base] then opts[base][ext] || config[ext] else config[ext]
-
-    config.twitter_url  = set_opt('twitter', 'url')
-    config.twitter_text = set_opt('twitter', 'text')
-    config.fb_url       = set_opt('facebook', 'url')
-    config.fb_title     = set_opt('facebook', 'title')
-    config.fb_caption   = set_opt('facebook', 'caption')
-    config.fb_text      = set_opt('facebook', 'text')
-    config.fb_image     = set_opt('facebook', 'image')
-    config.gplus_url    = set_opt('gplus', 'url')
+  ###################################
 
 
-    #############
-    ## PRIVATE ##
-    #############
 
-    ## Selector Configuration
-    config.selector = ".#{$sharer.attr('class').split(" ").join(".")}"
+  ###################################
 
-    ## Correct Common Errors
-    config.twitter_text = encodeURIComponent(config.twitter_text)
-    config.app_id = config.app_id.toString() if typeof config.app_id == 'integer'
-    config.protocol = opts.protocol || if ['http', 'https'].indexOf(window.location.href.split(':')[0]) is -1 then 'https://' else '//'
-
-
-    ################
-    # Inject Icons #
-    ################
-
+  inject_icons: ->
     # Notes
     # - Must be https:// due to CDN CORS caching issues
     # - To include the full entypo set, change URL to: https://www.sharebutton.co/fonts/entypo.css
-    unless $('link[href="https://www.sharebutton.co/fonts/v2/entypo.min.css"]').length
-      $("<link />").attr(
-        rel: "stylesheet"
-        href: "https://www.sharebutton.co/fonts/v2/entypo.min.css"
-      ).appendTo $("head")
+    unless @el.head.querySelector('link[href="https://www.sharebutton.co/fonts/v2/entypo.min.css"]')
+      link = document.createElement("link")
+      link.setAttribute("rel", "stylesheet")
+      link.setAttribute("href", "https://www.sharebutton.co/fonts/v2/entypo.min.css")
+      @el.head.appendChild(link)
 
 
-    ##############
-    # Inject CSS #
-    ##############
+  inject_fonts: ->
+    unless @el.head.querySelector("link[href=\"http://fonts.googleapis.com/css?family=Lato:900&text=#{@config.ui.button_text}\"]")
+      link = document.createElement("link")
+      link.setAttribute("rel", "stylesheet")
+      link.setAttribute("href", "http://fonts.googleapis.com/css?family=Lato:900&text=#{@config.ui.button_text}")
+      @el.head.appendChild(link)
+  
 
-    unless $("meta[name='sharer#{config.selector}']").length
-      $('head').append(getStyles(config))
-               .append("<meta name='sharer#{config.selector}'>")
+  inject_css: (instance) ->
+    selector = ".#{instance.getAttribute('class').split(" ").join(".")}"
+
+    unless @el.head.querySelector("meta[name='sharer#{selector}']")
+      @config.selector = selector # TODO: Temporary
+      @el.head.innerHTML += getStyles(@config)
+      delete @config.selector # TODO: Temporary
+
+      meta = document.createElement("meta")
+      meta.setAttribute("name", "sharer#{selector}")
+      @el.head.appendChild(meta)
 
 
-    ################
-    # Inject Fonts #
-    ################
-    
-    if config.text_font
-      unless $('link[href="'+config.protocol+'fonts.googleapis.com/css?family=Lato:900"]').length
+  inject_html: (instance) ->
+    instance.innerHTML = "<label class='entypo-#{@config.ui.button_icon}'><span>#{@config.ui.button_text}</span></label><div class='social #{@config.ui.flyout}'><ul><li class='entypo-twitter' data-network='twitter'></li><li class='entypo-facebook' data-network='facebook'></li><li class='entypo-gplus' data-network='gplus'></li></ul></div>"
+
+
+  inject_facebook_sdk: ->
+    if !window.FB && @config.network.facebook.app_id && !@el.body.querySelector('#fb-root')
+      @el.body.innerHTML += "<div id='fb-root'></div><script>(function(a,b,c){var d,e=a.getElementsByTagName(b)[0];a.getElementById(c)||(d=a.createElement(b),d.id=c,d.src='#{@config.protocol}connect.facebook.net/en_US/all.js#xfbml=1&appId=#{@config.network.facebook.app_id}',e.parentNode.insertBefore(d,e))})(document,'script','facebook-jssdk');</script>"
+
+
+  ###################################
+
+
+  update_network_configuration: ->
+    for network, options of @config.network
+      for option of options
+        if @config.network[network][option] is null
+          @config.network[network][option] = @config[option]
+
+    @config.network.twitter.text = encodeURIComponent(@config.network.twitter.text)
+
+    if @type(@config.network.facebook.app_id) is 'integer'
+      @config.network.facebook.app_id = @config.network.facebook.app_id.toString()
+
+    network_paths =
+      network:
+        google_plus:
+          path: "https://plus.google.com/share?url=#{@config.network.google_plus.url}"
+        twitter:
+          path: "https://twitter.com/intent/tweet?text=#{@config.network.twitter.text}&url=#{@config.network.twitter.url}"
+        facebook:
+          path: "https://www.facebook.com/sharer/sharer.php?u=#{@config.network.facebook.url}" # TODO: Change to network specific
+ 
+    @extend(@config, network_paths, true)
+
+
+#####################
+#####################
+
+
+t1 = new Share '.share-button',
+  network:
+    facebook:
+      app_id: 12345
+
+#t2 = new Share '.share-button',
+#  network:
+#    facebook:
+#      app_id: 98765
+
+
+# console.log "====", t1.config.network
+
+
+
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+
+
+
+if false
+  $ = jQuery
+  $.fn.share = (opts) ->
+    #########################
+    # Iterate over elements #
+    #########################
+
+    $(@).each (i, el) ->
+
+      ######################
+      # Set Local Elements #
+      ######################
+
+      $sharer = $(@)
+
+
+      #################
+      # Configuration #
+      #################
+
+      ## Add unique class to each element and hide
+
+      $sharer.addClass("sharer-#{i}")
+      $sharer.hide()
+
+      ## Set up options
+
+      opts ?= {}
+      config = {}
+
+      ## Basic Configurations
+
+      config.url        = opts.url || window.location.href
+      config.text       = opts.text || $('meta[name=description]').attr('content') || ''
+      config.app_id     = opts.app_id
+      config.title      = opts.title
+      config.image      = opts.image
+      config.flyout     = opts.flyout || 'top center'
+      config.text_font  = if typeof(opts.text_font) is 'boolean' then opts.text_font else true
+   
+      ## UI Configurations
+
+      config.button_color      = opts.color || '#333'
+      config.button_background = opts.background || '#e1e1e1'
+      config.button_icon       = opts.icon || 'export'
+      config.button_text       = if typeof(opts.button_text) is 'string'
+        opts.button_text
+      else
+        'Share'
+
+      ## Network-Specific Configurations
+
+      set_opt = (base,ext) -> if opts[base] then opts[base][ext] || config[ext] else config[ext]
+
+      config.twitter_url  = set_opt('twitter', 'url')
+      config.twitter_text = set_opt('twitter', 'text')
+      config.fb_url       = set_opt('facebook', 'url')
+      config.fb_title     = set_opt('facebook', 'title')
+      config.fb_caption   = set_opt('facebook', 'caption')
+      config.fb_text      = set_opt('facebook', 'text')
+      config.fb_image     = set_opt('facebook', 'image')
+      config.gplus_url    = set_opt('gplus', 'url')
+
+
+      #############
+      ## PRIVATE ##
+      #############
+
+      ## Selector Configuration
+      config.selector = ".#{$sharer.attr('class').split(" ").join(".")}"
+
+      ## Correct Common Errors
+      config.twitter_text = encodeURIComponent(config.twitter_text)
+      config.app_id = config.app_id.toString() if typeof config.app_id == 'integer'
+      config.protocol = opts.protocol || if ['http', 'https'].indexOf(window.location.href.split(':')[0]) is -1 then 'https://' else '//'
+
+
+      ################
+      # Inject Icons #
+      ################
+
+      # Notes
+      # - Must be https:// due to CDN CORS caching issues
+      # - To include the full entypo set, change URL to: https://www.sharebutton.co/fonts/entypo.css
+      unless $('link[href="https://www.sharebutton.co/fonts/v2/entypo.min.css"]').length
         $("<link />").attr(
           rel: "stylesheet"
-          href: "#{config.protocol}fonts.googleapis.com/css?family=Lato:900&text=#{config.button_text}"
+          href: "https://www.sharebutton.co/fonts/v2/entypo.min.css"
         ).appendTo $("head")
 
-    ###############
-    # Inject HTML #
-    ###############
 
-    $(@).html("<label class='entypo-#{config.button_icon}'><span>#{config.button_text}</span></label><div class='social #{config.flyout}'><ul><li class='entypo-twitter' data-network='twitter'></li><li class='entypo-facebook' data-network='facebook'></li><li class='entypo-gplus' data-network='gplus'></li></ul></div>")
+      ##############
+      # Inject CSS #
+      ##############
+
+      unless $("meta[name='sharer#{config.selector}']").length
+        $('head').append(getStyles(config))
+                 .append("<meta name='sharer#{config.selector}'>")
 
 
-    #######################
-    # Set Up Facebook API #
-    #######################
+      ################
+      # Inject Fonts #
+      ################
+      
+      if config.text_font
+        unless $('link[href="'+config.protocol+'fonts.googleapis.com/css?family=Lato:900"]').length
+          $("<link />").attr(
+            rel: "stylesheet"
+            href: "#{config.protocol}fonts.googleapis.com/css?family=Lato:900&text=#{config.button_text}"
+          ).appendTo $("head")
 
-    if !window.FB && config.app_id && ($('#fb-root').length is 0)
-      $body.append("<div id='fb-root'></div><script>(function(a,b,c){var d,e=a.getElementsByTagName(b)[0];a.getElementById(c)||(d=a.createElement(b),d.id=c,d.src='#{config.protocol}connect.facebook.net/en_US/all.js#xfbml=1&appId=#{config.app_id}',e.parentNode.insertBefore(d,e))})(document,'script','facebook-jssdk');</script>")
+      ###############
+      # Inject HTML #
+      ###############
 
-    ###########################
-    # Share URL Configuration #
-    ###########################
+      $(@).html("<label class='entypo-#{config.button_icon}'><span>#{config.button_text}</span></label><div class='social #{config.flyout}'><ul><li class='entypo-twitter' data-network='twitter'></li><li class='entypo-facebook' data-network='facebook'></li><li class='entypo-gplus' data-network='gplus'></li></ul></div>")
 
-    paths =
-      twitter: "http://twitter.com/intent/tweet?text=#{config.twitter_text}&url=#{config.twitter_url}"
-      facebook: "https://www.facebook.com/sharer/sharer.php?u=#{config.fb_url}"
-      gplus: "https://plus.google.com/share?url=#{config.gplus_url}"
 
-    ##############################
-    # Popup/Share Links & Events #
-    ##############################
+      #######################
+      # Set Up Facebook API #
+      #######################
 
-    parent  = $sharer.parent()
-    bubbles = parent.find(".social")
-    bubble  = parent.find("#{config.selector} .social")
+      if !window.FB && config.app_id && ($('#fb-root').length is 0)
+        $body.append("<div id='fb-root'></div><script>(function(a,b,c){var d,e=a.getElementsByTagName(b)[0];a.getElementById(c)||(d=a.createElement(b),d.id=c,d.src='#{config.protocol}connect.facebook.net/en_US/all.js#xfbml=1&appId=#{config.app_id}',e.parentNode.insertBefore(d,e))})(document,'script','facebook-jssdk');</script>")
 
-    toggle = (e) ->
-      e.stopPropagation()
-      bubble.toggleClass('active')
+      ###########################
+      # Share URL Configuration #
+      ###########################
 
-    open = -> bubble.addClass('active')
+      paths =
+        twitter: "http://twitter.com/intent/tweet?text=#{config.twitter_text}&url=#{config.twitter_url}"
+        facebook: "https://www.facebook.com/sharer/sharer.php?u=#{config.fb_url}"
+        gplus: "https://plus.google.com/share?url=#{config.gplus_url}"
 
-    close = -> bubble.removeClass('active')
+      ##############################
+      # Popup/Share Links & Events #
+      ##############################
 
-    click_link = ->
-      link = paths[$(@).data('network')]
-      if ($(@).data('network') == 'facebook') && config.app_id
-        unless window.FB
-          console.log "The Facebook JS SDK hasn't loaded yet."
-          return
+      parent  = $sharer.parent()
+      bubbles = parent.find(".social")
+      bubble  = parent.find("#{config.selector} .social")
 
-        window.FB.ui
-          method: 'feed',
-          name: config.fb_title
-          link: config.fb_url
-          picture: config.fb_image
-          caption: config.fb_caption
-          description: config.fb_text
-      else
-        popup =
-          width: 500
-          height: 350
+      toggle = (e) ->
+        e.stopPropagation()
+        bubble.toggleClass('active')
 
-        popup.top = (screen.height/2) - (popup.height/2)
-        popup.left = (screen.width/2) - (popup.width/2)
+      open = -> bubble.addClass('active')
 
-        window.open(link, 'targetWindow', "toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,left=#{popup.left},top=#{popup.top},width=#{popup.width},height=#{popup.height}")
-      return false
+      close = -> bubble.removeClass('active')
 
-    $sharer.find('label').on 'click', toggle
-    $sharer.find('li').on 'click', click_link
+      click_link = ->
+        link = paths[$(@).data('network')]
+        if ($(@).data('network') == 'facebook') && config.app_id
+          unless window.FB
+            console.log "The Facebook JS SDK hasn't loaded yet."
+            return
 
-    $body.on 'click', -> bubbles.removeClass('active')
+          window.FB.ui
+            method: 'feed',
+            name: config.fb_title
+            link: config.fb_url
+            picture: config.fb_image
+            caption: config.fb_caption
+            description: config.fb_text
+        else
+          popup =
+            width: 500
+            height: 350
 
-    setTimeout (=> $sharer.show()), 250
+          popup.top = (screen.height/2) - (popup.height/2)
+          popup.left = (screen.width/2) - (popup.width/2)
 
-    # return a little API
-    return {
-      toggle: toggle.bind(@)
-      open: open.bind(@)
-      close: close.bind(@)
-      options: config
-      self: @
-    }
+          window.open(link, 'targetWindow', "toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,left=#{popup.left},top=#{popup.top},width=#{popup.width},height=#{popup.height}")
+        return false
+
+      $sharer.find('label').on 'click', toggle
+      $sharer.find('li').on 'click', click_link
+
+      $body.on 'click', -> bubbles.removeClass('active')
+
+      setTimeout (=> $sharer.show()), 250
+
+      # return a little API
+      return {
+        toggle: toggle.bind(@)
+        open: open.bind(@)
+        close: close.bind(@)
+        options: config
+        self: @
+      }
