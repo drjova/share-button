@@ -8,8 +8,20 @@ class ShareUtils
         to[prop] = from[prop] if overwrite or not hasProp
     return
 
-  trim: (str) ->
-    (if str.trim then str.trim() else str.replace(/^\s+|\s+$/g, ""))
+  type: (obj) -> # typeof has problems: http://javascript.crockford.com/remedial.html
+    if obj == undefined or obj == null
+      return String obj
+    classToType = {
+      '[object Boolean]':   'boolean',
+      '[object Number]':    'number',
+      '[object String]':    'string',
+      '[object Function]':  'function',
+      '[object Array]':     'array',
+      '[object Date]':      'date',
+      '[object RegExp]':    'regexp',
+      '[object Object]':    'object'
+    }
+    return classToType[Object.prototype.toString.call(obj)]
 
   hide: (el) ->
     el.style.display = "none"
@@ -19,31 +31,28 @@ class ShareUtils
     el.style.display = "block"
     return
 
-  hasClass: (el, cn) ->
-    (" " + el.className + " ").indexOf(" " + cn + " ") isnt -1
+  has_class: (el, class_name) ->
+    el.classList.contains(class_name)
 
-  addClass: (el, cn) ->
-    el.className = (if (el.className is "") then cn else el.className + " " + cn)  unless @hasClass(el, cn)
+  add_class: (el, class_name) ->
+    el.classList.add(class_name)
     return
 
-  removeClass: (el, cn) ->
-    el.className = @trim(" " + el.className + " ".replace(" " + cn + " ", " "))
+  remove_class: (el, class_name) ->
+    el.classList.remove(class_name)
     return
 
-  type: (obj) -> # typeof has problems: http://javascript.crockford.com/remedial.html
-    if obj == undefined or obj == null
-      return String obj
-    classToType = {
-      '[object Boolean]': 'boolean',
-      '[object Number]': 'number',
-      '[object String]': 'string',
-      '[object Function]': 'function',
-      '[object Array]': 'array',
-      '[object Date]': 'date',
-      '[object RegExp]': 'regexp',
-      '[object Object]': 'object'
-    }
-    return classToType[Object.prototype.toString.call(obj)]
+  popup: (url) ->
+    popup =
+      width:  500
+      height: 350
+
+    popup.top  = (screen.height/2) - (popup.height/2)
+    popup.left = (screen.width/2)  - (popup.width/2)
+
+    window.open(url, 'targetWindow', "toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes,left=#{popup.left},top=#{popup.top},width=#{popup.width},height=#{popup.height}")
+
+    return
 
 
 #####
@@ -98,9 +107,7 @@ class Share extends ShareUtils
 
   setup: (element, opts) ->
     ## Record all instances
-    @el.instances = document.getElementsByClassName("share-button") # TODO: needed live NodeList
-    #@el.instances = document.querySelectorAll("#{element}:not(.initialized)")
-    #@el.instances = document.querySelectorAll(element)
+    instances = document.querySelectorAll(element)
 
     ## Extend config object
     @extend(@config, opts, true)
@@ -112,44 +119,95 @@ class Share extends ShareUtils
     @inject_icons()
 
     ## Inject Google's Lato Fontset (if enabled)
-    if @config.ui.button_font
-      @inject_fonts()
+    @inject_fonts() if @config.ui.button_font
 
     ## Inject Facebook JS SDK (if Facebook is enabled)
-    if @config.network.facebook.enabled
-      @inject_facebook_sdk()
+    @inject_facebook_sdk() if @config.network.facebook.enabled
 
     ## Loop through and initialize each instance
-    for instance, index in @el.instances
-      @setup_instance(instance, index)
+    @setup_instance(element, index) for instance, index in instances
 
     return
 
 
-  setup_instance: (instance, index) ->
-    #@hide(instance)
+  setup_instance: (element, index) ->
+    instance = document.querySelectorAll(element)[index] # Reload Element. gS/qSA doesn't support live NodeLists
 
-    @addClass(instance, "sharer-#{index}")
-    @addClass(instance, "initialized")
-    console.log instance.getAttribute('class')
+    @hide(instance)
 
-    #selector = ".#{instance.getAttribute('class').split(" ").join(".")}"
-    #console.log selector
-    #console.log document.querySelector(selector)
+    @add_class(instance, "sharer-#{index}")
+    @add_class(instance, "initialized") # FF doesn't support adding multiple classes in a single call
+
+    instance = document.querySelectorAll(element)[index] # Reload Element. qS/qSA doesn't support live NodeLists
 
     @inject_css(instance)
     @inject_html(instance)
 
     @show(instance)
-    #console.log instance
+
+    label    = instance.querySelector('label')   # TODO: findByTagName
+    button   = instance.querySelector('.social') # TODO: findByClassName
+    networks = instance.querySelectorAll('li')   # TODO: findByTagName
+    
+    label.addEventListener "click", => @event_toggle(button)
+
+    _this = @
+    for network, index in networks
+      network.addEventListener "click", ->
+        _this.event_network(instance, @)
+        _this.event_close(button)
 
 
   ###################################
 
 
+  event_toggle: (button) ->
+    if @has_class(button, "active")
+      @event_close(button)
+    else
+      @event_open(button)
+
+    return
+
+  event_open: (button) ->
+    @add_class(button, "active")
+    return
+
+  event_close: (button) ->
+    @remove_class(button, "active")
+    return
+
+  event_network: (instance, network) ->
+    str = network.getAttribute("data-network")
+    @["network_#{str}"]()
+
 
   ###################################
 
+
+  network_facebook: ->
+    unless window.FB
+      console.log "The Facebook JS SDK hasn't loaded yet."
+      return
+
+    window.FB.ui
+      method:       'feed',
+      name:         @config.network.facebook.title
+      link:         @config.network.facebook.url
+      picture:      @config.network.facebook.image
+      caption:      @config.network.facebook.caption
+      description:  @config.network.facebook.description
+
+  network_twitter: ->
+    @popup(@config.network.twitter.path)
+
+  network_google_plus: ->
+    @popup(@config.network.google_plus.path)
+
+
+  ###################################
+
+  ## Injects icon font CSS file into the header
   inject_icons: ->
     # Notes
     # - Must be https:// due to CDN CORS caching issues
@@ -161,6 +219,7 @@ class Share extends ShareUtils
       @el.head.appendChild(link)
 
 
+  ## Injects Google Font 'Lato' CSS file into the header
   inject_fonts: ->
     unless @el.head.querySelector("link[href=\"http://fonts.googleapis.com/css?family=Lato:900&text=#{@config.ui.button_text}\"]")
       link = document.createElement("link")
@@ -169,6 +228,7 @@ class Share extends ShareUtils
       @el.head.appendChild(link)
   
 
+  ## Injects instantiation specific CSS styles into the header
   inject_css: (instance) ->
     selector = ".#{instance.getAttribute('class').split(" ").join(".")}"
 
@@ -182,14 +242,19 @@ class Share extends ShareUtils
       @el.head.appendChild(meta)
 
 
+  ## Injects HTML into the button
   inject_html: (instance) ->
     instance.innerHTML = "<label class='entypo-#{@config.ui.button_icon}'><span>#{@config.ui.button_text}</span></label><div class='social #{@config.ui.flyout}'><ul><li class='entypo-twitter' data-network='twitter'></li><li class='entypo-facebook' data-network='facebook'></li><li class='entypo-gplus' data-network='gplus'></li></ul></div>"
 
 
+  ## Injects the Facebook JS SDK
   inject_facebook_sdk: ->
     if !window.FB && @config.network.facebook.app_id && !@el.body.querySelector('#fb-root')
-      @el.body.innerHTML += "<div id='fb-root'></div><script>(function(a,b,c){var d,e=a.getElementsByTagName(b)[0];a.getElementById(c)||(d=a.createElement(b),d.id=c,d.src='#{@config.protocol}connect.facebook.net/en_US/all.js#xfbml=1&appId=#{@config.network.facebook.app_id}',e.parentNode.insertBefore(d,e))})(document,'script','facebook-jssdk');</script>"
+      script      = document.createElement("script")
+      script.text = "window.fbAsyncInit=function(){FB.init({appId:'#{@config.network.facebook.app_id}',status:true,xfbml:true})};(function(e,t,n){var r,i=e.getElementsByTagName(t)[0];if(e.getElementById(n)){return}r=e.createElement(t);r.id=n;r.src='#{@config.protocol}connect.facebook.net/en_US/all.js';i.parentNode.insertBefore(r,i)})(document,'script','facebook-jssdk')"
 
+      @el.body.innerHTML += "<div id='fb-root'></div>"
+      @el.body.appendChild(script)
 
   ###################################
 
@@ -221,18 +286,17 @@ class Share extends ShareUtils
 #####################
 
 
-t1 = new Share '.share-button',
+t1 = new Share '.share-button-top',
   network:
     facebook:
       app_id: 12345
 
-#t2 = new Share '.share-button',
-#  network:
-#    facebook:
-#      app_id: 98765
-
-
-# console.log "====", t1.config.network
+t2 = new Share '.share-button-bottom',
+  ui:
+    button_text: '12345'
+  network:
+    facebook:
+      app_id: 98765
 
 
 
@@ -240,6 +304,24 @@ t1 = new Share '.share-button',
 ##################################################################
 ##################################################################
 ##################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
